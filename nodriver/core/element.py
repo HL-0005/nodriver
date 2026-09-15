@@ -624,6 +624,7 @@ class Element:
             logger.warning("could not calculate box model for %s", self)
             return
         end_point = None
+        relative_move = relative
         if isinstance(destination, Element):
             try:
                 end_point = (await destination.get_position()).center
@@ -632,16 +633,13 @@ class Element:
             if not end_point:
                 logger.warning("could not calculate box model for %s", destination)
                 return
+            # Element destinations are already absolute coordinates.
+            relative_move = False
         elif isinstance(destination, (tuple, list)):
-            if relative:
-                end_point = (
-                    start_point[0] + destination[0],
-                    start_point[1] + destination[1],
-                )
-            else:
-                end_point = destination
+            # Tab.mouse_drag is the single owner of relative-coordinate expansion.
+            end_point = destination
         await self._tab.mouse_drag(
-            start_point, end_point, relative=relative, steps=steps
+            start_point, end_point, relative=relative_move, steps=steps
         )
         # await self._tab.send(
         #     cdp.input_.dispatch_mouse_event(

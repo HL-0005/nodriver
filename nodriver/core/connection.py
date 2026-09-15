@@ -397,9 +397,11 @@ class Connection:
             if not self.attached or not self.socket:
                 await self.attach()
 
-        method, *params = next(cdp_obj).values()
-        if params:
-            params = params.pop()
+        command = next(cdp_obj)
+        method = command["method"]
+        params = command.get("params") or {}
+        if not isinstance(params, dict):
+            raise TypeError(f"CDP command params must be a dict, got {type(params).__name__}")
         _id = next(self.__count__)
         message = {"method": method, "params": params, "id": _id}
         if not _attach:
