@@ -1,0 +1,40 @@
+name: Apply AHB fork compatibility patches
+
+on:
+  push:
+    branches: ["compat/python-314-ahb"]
+    paths:
+      - ".github/workflows/apply-ahb-fork-patches.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.ref == 'refs/heads/compat/python-314-ahb'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: compat/python-314-ahb
+          fetch-depth: 1
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - name: Apply assert-backed fork patches
+        run: python tools/apply_ahb_fork_patches.py
+      - name: Validate patch output
+        run: |
+          git diff --check
+          python -m compileall -q nodriver tools/apply_ahb_fork_patches.py
+          git status --short
+      - name: Commit branch-only compatibility patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml tox.ini generate_cdp.py nodriver tests .github/workflows/ahb-python314-qualification.yml AHB_FORK_PROVENANCE.md
+          git diff --cached --quiet && { echo "No changes produced"; exit 1; }
+          git commit -m "Harden nodriver 0.50.3 for AHB on Python 3.14"
+          git push origin HEAD:compat/python-314-ahb
