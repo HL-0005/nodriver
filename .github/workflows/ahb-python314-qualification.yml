@@ -1,0 +1,60 @@
+name: AHB Python 3.14 Qualification
+
+on:
+  push:
+    branches: ["compat/python-314-ahb"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python314:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Install qualification tools
+        run: python -m pip install --upgrade pip build 'pytest>=9.0.3' pip-audit
+      - name: Prove generated sources compile under Python 3.14
+        run: python -m compileall -q nodriver
+      - name: Install fork
+        run: python -m pip install -e .
+      - name: Dependency consistency
+        run: python -m pip check
+      - name: Regression suite
+        run: python -m pytest -q tests/test_ahb_fork_compat.py
+      - name: Import and API contract
+        run: |
+          python - <<'PY'
+          import inspect
+          import nodriver as uc
+          from nodriver import cdp
+          from nodriver.core.browser import Browser
+          assert callable(uc.start)
+          assert hasattr(cdp.network, "RequestWillBeSent")
+          assert hasattr(cdp.network, "ResponseReceived")
+          assert "proxy_server" in inspect.signature(Browser.create_context).parameters
+          print("NODRIVER_AHB_PYTHON314_IMPORT=PASS")
+          PY
+      - name: Dependency audit
+        run: python -m pip_audit
+      - name: Build wheel and print exact SHA-256
+        run: |
+          rm -rf dist build
+          python -m build --wheel
+          python - <<'PY'
+          import hashlib
+          import pathlib
+          wheels = list(pathlib.Path("dist").glob("*.whl"))
+          assert len(wheels) == 1, wheels
+          wheel = wheels[0]
+          digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+          print(f"NODRIVER_AHB_WHEEL={wheel.name}")
+          print(f"NODRIVER_AHB_WHEEL_SHA256={digest}")
+          PY

@@ -900,7 +900,7 @@ class Tab(Connection):
             return errors
         if remote_object:
             if return_by_value:
-                if remote_object.value:
+                if remote_object.value is not None:
                     return remote_object.value
             else:
                 if remote_object.deep_serialized_value:
@@ -1080,7 +1080,7 @@ class Tab(Connection):
         if exception_details:
             raise ProtocolException(exception_details)
         if return_by_value:
-            if remote_object.value:
+            if remote_object.value is not None:
                 return remote_object.value
         else:
             return remote_object, exception_details
@@ -1867,11 +1867,12 @@ class Tab(Connection):
         :rtype:
         """
 
-        res = await self.evaluate(
-            "document.body.offsetHeight - window.innerHeight == window.scrollY"
+        return bool(
+            await self.evaluate(
+                "document.body.offsetHeight - window.innerHeight == window.scrollY",
+                return_by_value=True,
+            )
         )
-        if res:
-            return res[0].value
 
     async def mouse_click(
         self,

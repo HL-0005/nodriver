@@ -426,9 +426,12 @@ class Browser(Connection):
             wakeLockSystem
             windowManagement
         """
-        permissions = list(cdp.browser.PermissionType)
-        permissions.remove(cdp.browser.PermissionType.FLASH)
-        permissions.remove(cdp.browser.PermissionType.CAPTURED_SURFACE_CONTROL)
+        excluded_permission_names = {"FLASH", "CAPTURED_SURFACE_CONTROL"}
+        permissions = [
+            permission
+            for permission in cdp.browser.PermissionType
+            if permission.name not in excluded_permission_names
+        ]
         await self.send(cdp.browser.grant_permissions(permissions))
 
     async def tile_windows(self, windows=None, max_columns: int = 0):

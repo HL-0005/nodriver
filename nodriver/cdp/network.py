@@ -1342,7 +1342,7 @@ class Cookie:
     #: Cookie expiration date as the number of seconds since the UNIX epoch.
     #: The value is set to -1 if the expiry date is not set.
     #: The value can be null for values that cannot be represented in
-    #: JSON (±Inf).
+    #: JSON (Â±Inf).
     expires: typing.Optional[float] = None
 
     #: Cookie SameSite type.
@@ -1388,9 +1388,9 @@ class Cookie:
             http_only=bool(json['httpOnly']),
             secure=bool(json['secure']),
             session=bool(json['session']),
-            priority=CookiePriority.from_json(json['priority']),
-            source_scheme=CookieSourceScheme.from_json(json['sourceScheme']),
-            source_port=int(json['sourcePort']),
+            priority=CookiePriority.from_json(json.get('priority', 'Medium')),
+            source_scheme=CookieSourceScheme.from_json(json.get('sourceScheme', 'Unset')),
+            source_port=int(json.get('sourcePort', -1)),
             expires=float(json['expires']) if json.get('expires', None) is not None else None,
             same_site=CookieSameSite.from_json(json['sameSite']) if json.get('sameSite', None) is not None else None,
             partition_key=CookiePartitionKey.from_json(json['partitionKey']) if json.get('partitionKey', None) is not None else None,

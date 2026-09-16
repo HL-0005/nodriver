@@ -979,7 +979,7 @@ def parse(json_path, output_path):
     :returns: a list of CDP domain objects
     """
     global current_version
-    with json_path.open() as json_file:
+    with json_path.open(encoding="utf-8") as json_file:
         schema = json.load(json_file)
     version = schema["version"]
     assert (version["major"], version["minor"]) == ("1", "3")
@@ -998,7 +998,7 @@ def generate_init(init_path, domains):
     :param list[tuple] modules: a list of modules each represented as tuples
         of (name, list_of_exported_symbols)
     """
-    with init_path.open("w") as init_file:
+    with init_path.open("w", encoding="utf-8", newline="\n") as init_file:
         init_file.write(INIT_HEADER)
         init_file.write(
             "from . import ({})".format(", ".join(domain.module for domain in domains))
@@ -1018,7 +1018,7 @@ def generate_docs(docs_path, domains):
     # Generate document for each domain
     for domain in domains:
         doc = docs_path / f"{domain.module}.rst"
-        with doc.open("w") as f:
+        with doc.open("w", encoding="utf-8", newline="\n") as f:
             f.write(domain.generate_sphinx())
 
 
@@ -1049,6 +1049,26 @@ def fix_protocol_spec(domains):
                             break
 
 
+def apply_generated_compatibility_fixes(domain, code: str) -> str:
+    """Preserve local compatibility hardening across CDP regeneration."""
+    if domain.domain != "Network":
+        return code
+
+    replacements = {
+        "priority=CookiePriority.from_json(json['priority']),":
+            "priority=CookiePriority.from_json(json.get('priority', 'Medium')),",
+        "source_scheme=CookieSourceScheme.from_json(json['sourceScheme']),":
+            "source_scheme=CookieSourceScheme.from_json(json.get('sourceScheme', 'Unset')),",
+        "source_port=int(json['sourcePort']),":
+            "source_port=int(json.get('sourcePort', -1)),",
+    }
+    for old, new in replacements.items():
+        if old not in code:
+            raise RuntimeError(f"expected Network.Cookie generator fragment missing: {old}")
+        code = code.replace(old, new, 1)
+    return code
+
+
 def selfgen():
     """Generate CDP types and docs for ourselves"""
     here = Path(__file__).parent.resolve()
@@ -1077,12 +1097,12 @@ def selfgen():
         for domain in domains:
             logger.info("Generating module: %s → %s.py", domain.domain, domain.module)
             module_path = output_path / f"{domain.module}.py"
-            with module_path.open("w") as module_file:
-                module_file.write(domain.generate_code())
+            with module_path.open("w", encoding="utf-8", newline="\n") as module_file:
+                module_file.write(apply_generated_compatibility_fixes(domain, domain.generate_code()))
 
         generate_init(output_path / "__init__.py", domains)
         generate_docs(docs_path, domains)
-        (output_path / "README.md").write_text(GENERATED_PACKAGE_NOTICE)
+        (output_path / "README.md").write_text(GENERATED_PACKAGE_NOTICE, encoding="utf-8")
         (output_path / "py.typed").touch()
 
         from textwrap import dedent
@@ -1111,7 +1131,8 @@ def selfgen():
                 ''' Parse a JSON dictionary into a CDP event. '''
                 return _event_parsers[json['method']].from_json(json['params'])
             """
-            )
+            ),
+            encoding="utf-8",
         )
 
     finally:
