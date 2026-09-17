@@ -9,6 +9,7 @@ import pytest
 import nodriver
 from nodriver import cdp
 from nodriver.core import config as config_module
+from nodriver.core.browser import _wait_for_devtools
 from nodriver.core.element import Element
 from nodriver.core.tab import Tab
 
@@ -107,6 +108,49 @@ def test_find_chrome_executable_honors_path_order(monkeypatch):
     monkeypatch.setattr(config_module.os.path, "exists", exists)
     monkeypatch.setattr(config_module.os, "access", lambda path, mode: exists(path))
     assert config_module.find_chrome_executable() == "/preferred/chromium"
+
+
+def test_browser_startup_readiness_allows_more_than_five_probes():
+    class FakeHTTP:
+        def __init__(self):
+            self.calls = 0
+
+        async def get(self, endpoint):
+            assert endpoint == "version"
+            self.calls += 1
+            if self.calls <= 6:
+                raise ConnectionRefusedError("not ready")
+            return {"webSocketDebuggerUrl": "ws://127.0.0.1/devtools/browser/test"}
+
+    http = FakeHTTP()
+    info = asyncio.run(_wait_for_devtools(http, timeout=1.0, poll_interval=0))
+    assert http.calls == 7
+    assert info["webSocketDebuggerUrl"].startswith("ws://")
+
+
+def test_browser_startup_readiness_fails_early_when_child_exits():
+    class FakeHTTP:
+        async def get(self, endpoint):
+            raise AssertionError("DevTools must not be probed after browser exit")
+
+    with pytest.raises(RuntimeError, match="return code 17"):
+        asyncio.run(
+            _wait_for_devtools(
+                FakeHTTP(),
+                process=SimpleNamespace(returncode=17),
+                timeout=1.0,
+                poll_interval=0,
+            )
+        )
+
+
+def test_browser_startup_readiness_honors_deadline():
+    class SlowHTTP:
+        async def get(self, endpoint):
+            await asyncio.sleep(60)
+
+    with pytest.raises(TimeoutError, match="not ready within"):
+        asyncio.run(_wait_for_devtools(SlowHTTP(), timeout=0.01, poll_interval=0))
 
 
 def test_fork_version_source_label():
