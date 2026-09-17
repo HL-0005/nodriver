@@ -28,6 +28,52 @@ from .connection import Connection
 
 logger = logging.getLogger(__name__)
 
+_BROWSER_STARTUP_TIMEOUT_SECONDS = 30.0
+_BROWSER_STARTUP_POLL_INTERVAL_SECONDS = 0.5
+
+
+async def _wait_for_devtools(
+    http,
+    *,
+    process: asyncio.subprocess.Process | None = None,
+    timeout: float = _BROWSER_STARTUP_TIMEOUT_SECONDS,
+    poll_interval: float = _BROWSER_STARTUP_POLL_INTERVAL_SECONDS,
+):
+    """Wait until Chromium's DevTools endpoint is ready, within a hard deadline."""
+    timeout = float(timeout)
+    poll_interval = max(0.0, float(poll_interval))
+    if timeout <= 0:
+        raise ValueError("browser startup timeout must be greater than zero")
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    last_error: Exception | None = None
+
+    while True:
+        if process is not None and process.returncode is not None:
+            raise RuntimeError(
+                "browser process exited before DevTools became ready "
+                f"(return code {process.returncode})"
+            )
+
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            raise TimeoutError(
+                f"browser DevTools endpoint was not ready within {timeout:.1f} seconds"
+            ) from last_error
+
+        try:
+            return await asyncio.wait_for(
+                http.get("version"),
+                timeout=min(1.0, remaining),
+            )
+        except Exception as exc:
+            last_error = exc
+
+        remaining = deadline - loop.time()
+        if remaining > 0 and poll_interval:
+            await asyncio.sleep(min(poll_interval, remaining))
+
 
 class Browser(Connection):
     """
@@ -238,7 +284,7 @@ class Browser(Connection):
         since chrome usually can only use 1 proxy per browser.
         socks5 with authentication is supported by using a forwarder proxy, the
         correct string to use socks proxy with username/password auth is socks://USERNAME:PASSWORD@SERVER:PORT
-        http/https proxies with authentication are also supported: http://USERNAME:PASSWORD@SERVER:PORT
+        http/https proxies with authentication is supported: http://USERNAME:PASSWORD@SERVER:PORT
 
         dispose_on_detach – (EXPERIMENTAL) (Optional) If specified, disposes this context when debugging session disconnects.
         proxy_server – (EXPERIMENTAL) (Optional) Proxy server, similar to the one passed to –proxy-server
@@ -366,31 +412,26 @@ class Browser(Connection):
 
         self._http = HTTPApi((self.config.host, self.config.port))
         util.get_registered_instances().add(self)
-        await asyncio.sleep(0.25)
-        for _ in range(5):
-            try:
-                self.info = ContraDict(await self._http.get("version"), silent=True)
-
-            except (Exception,):
-                if _ == 4:
-                    logger.debug("could not start", exc_info=True)
-                await asyncio.sleep(0.5)
-            else:
-                break
-
-        if not self.info:
-            raise Exception(
-                (
-                    """
-                ---------------------
-                Failed to connect to browser
-                ---------------------
-                One of the causes could be when you are running as root.
-                In that case you need to pass no_sandbox=True 
-                """
-                )
+        startup_timeout = float(
+            getattr(
+                self.config,
+                "browser_startup_timeout",
+                _BROWSER_STARTUP_TIMEOUT_SECONDS,
             )
+        )
+        try:
+            info = await _wait_for_devtools(
+                self._http,
+                process=None if connect_existing else self._process,
+                timeout=startup_timeout,
+            )
+        except Exception:
+            util.get_registered_instances().discard(self)
+            if not connect_existing:
+                self.stop()
+            raise
 
+        self.info = ContraDict(info, silent=True)
         self.websocket_url = self.info.webSocketDebuggerUrl
         await self.attach()
         await self.update_targets()
@@ -535,7 +576,7 @@ class Browser(Connection):
         :param item:
         :type item:
         :return:
-        :rtype: tab.Tab
+        :rtype:
         """
         if isinstance(item, int):
             return self.tabs[item]
@@ -742,7 +783,6 @@ class CookieJar:
                 break
         else:
             connection = self._browser
-
         cookies = await self.get_all(requests_cookie_format=False)
         included_cookies = []
         for cookie in cookies:
