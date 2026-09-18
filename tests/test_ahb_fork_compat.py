@@ -9,7 +9,8 @@ import pytest
 import nodriver
 from nodriver import cdp
 from nodriver.core import config as config_module
-from nodriver.core.browser import _wait_for_devtools
+from nodriver.core import util as util_module
+from nodriver.core.browser import Browser, _wait_for_devtools
 from nodriver.core.element import Element
 from nodriver.core.tab import Tab
 
@@ -151,6 +152,62 @@ def test_browser_startup_readiness_honors_deadline():
 
     with pytest.raises(TimeoutError, match="not ready within"):
         asyncio.run(_wait_for_devtools(SlowHTTP(), timeout=0.01, poll_interval=0))
+
+
+def test_browser_aclose_closes_child_connections_and_reaps_process():
+    events = []
+
+    class FakeChild:
+        async def aclose(self):
+            events.append("child-close")
+
+    class FakeProcess:
+        def __init__(self):
+            self.returncode = None
+            self.pid = 4242
+            self.terminated = False
+            self.killed = False
+            self.communicated = False
+
+        def terminate(self):
+            self.terminated = True
+            self.returncode = -15
+            events.append("terminate")
+
+        def kill(self):
+            self.killed = True
+            self.returncode = -9
+            events.append("kill")
+
+        async def communicate(self):
+            self.communicated = True
+            events.append("communicate")
+            return b"", b""
+
+    async def exercise():
+        browser = object.__new__(Browser)
+        browser._targets = [FakeChild(), FakeChild()]
+        browser._mapper = {}
+        browser._listener_task = None
+        browser.socket = None
+        process = FakeProcess()
+        browser._process = process
+        browser._process_pid = process.pid
+        util_module.get_registered_instances().add(browser)
+
+        await browser.aclose()
+
+        assert browser._targets == []
+        assert browser._process is None
+        assert browser._process_pid is None
+        assert browser not in util_module.get_registered_instances()
+        return process
+
+    process = asyncio.run(exercise())
+    assert events[:2] == ["child-close", "child-close"]
+    assert process.terminated is True
+    assert process.communicated is True
+    assert process.killed is False
 
 
 def test_fork_version_source_label():

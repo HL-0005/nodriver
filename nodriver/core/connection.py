@@ -237,7 +237,15 @@ class Connection:
             self._listener_task = asyncio.create_task(self._listener())
 
     async def aclose(self):
-        """ """
+        """Close this connection tree and all websocket listener tasks."""
+        children = tuple(self._targets)
+        self._targets.clear()
+        for child in children:
+            try:
+                await child.aclose()
+            except Exception:
+                logger.debug("failed to close child connection", exc_info=True)
+
         self._fail_pending_futures(ConnectionError("Connection closing"))
         if self._listener_task is not None:
             self._listener_task.cancel()

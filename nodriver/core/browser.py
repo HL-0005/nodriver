@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 _BROWSER_STARTUP_TIMEOUT_SECONDS = 30.0
 _BROWSER_STARTUP_POLL_INTERVAL_SECONDS = 0.5
+_BROWSER_SHUTDOWN_TIMEOUT_SECONDS = 5.0
 
 
 async def _wait_for_devtools(
@@ -629,6 +630,38 @@ class Browser(Connection):
                     self._i += 1
                 else:
                     del self._i
+
+    async def aclose(self):
+        """Close CDP connections and fully reap an owned Chromium process."""
+        try:
+            await super().aclose()
+        finally:
+            process = self._process
+            try:
+                if process is not None:
+                    if process.returncode is None:
+                        try:
+                            process.terminate()
+                        except ProcessLookupError:
+                            pass
+
+                    communicate_task = asyncio.create_task(process.communicate())
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.shield(communicate_task),
+                            timeout=_BROWSER_SHUTDOWN_TIMEOUT_SECONDS,
+                        )
+                    except TimeoutError:
+                        if process.returncode is None:
+                            try:
+                                process.kill()
+                            except ProcessLookupError:
+                                pass
+                        await communicate_task
+            finally:
+                self._process = None
+                self._process_pid = None
+                util.get_registered_instances().discard(self)
 
     def stop(self):
         try:
