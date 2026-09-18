@@ -370,7 +370,9 @@ class Connection:
                 child for child in self._targets if child.session_id == event.session_id
             ]
             for child in removed:
-                self._targets.remove(child)
+                await child.aclose()
+                if child in self._targets:
+                    self._targets.remove(child)
 
         elif isinstance(event, cdp.target.TargetInfoChanged):
             if event.target_info.target_id == self.target.target_id:
@@ -389,7 +391,9 @@ class Connection:
             else:
                 for child in self._targets.copy():
                     if child.target.target_id == event.target_id:
-                        self._targets.remove(child)
+                        await child.aclose()
+                        if child in self._targets:
+                            self._targets.remove(child)
 
     async def send(
         self,

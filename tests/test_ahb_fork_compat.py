@@ -210,5 +210,58 @@ def test_browser_aclose_closes_child_connections_and_reaps_process():
     assert process.killed is False
 
 
+
+def test_target_destroy_closes_child_before_eviction():
+    events = []
+
+    class FakeChild:
+        def __init__(self):
+            self.target = SimpleNamespace(target_id=cdp.target.TargetID("child"))
+
+        async def aclose(self):
+            events.append("close")
+
+    async def exercise():
+        parent = object.__new__(Browser)
+        parent.target = SimpleNamespace(target_id=cdp.target.TargetID("browser"))
+        child = FakeChild()
+        parent._targets = [child]
+
+        await parent._attach_handler(
+            cdp.target.TargetDestroyed(target_id=cdp.target.TargetID("child"))
+        )
+
+        assert parent._targets == []
+
+    asyncio.run(exercise())
+    assert events == ["close"]
+
+
+def test_update_targets_closes_stale_child_before_eviction():
+    events = []
+
+    class FakeChild:
+        def __init__(self):
+            self.target = SimpleNamespace(target_id=cdp.target.TargetID("stale"))
+
+        async def aclose(self):
+            events.append("close")
+
+    async def exercise():
+        browser = object.__new__(Browser)
+        child = FakeChild()
+        browser._targets = [child]
+
+        async def send(_):
+            return []
+
+        browser.send = send
+        await Browser.update_targets(browser)
+        assert browser._targets == []
+
+    asyncio.run(exercise())
+    assert events == ["close"]
+
+
 def test_fork_version_source_label():
     assert 'version = "0.50.3+AHB"' in Path("pyproject.toml").read_text(encoding="utf-8")

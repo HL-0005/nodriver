@@ -557,7 +557,9 @@ class Browser(Connection):
 
         for ctab in self._targets.copy():
             if ctab.target not in targets:
-                self._targets.remove(ctab)
+                await ctab.aclose()
+                if ctab in self._targets:
+                    self._targets.remove(ctab)
 
         await asyncio.sleep(0)
 
